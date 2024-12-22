@@ -34,40 +34,6 @@ CONFIG = {
 }
 
 
-# class AudioHandler:
-#     def __init__(self):
-#         self.session = None
-
-#     async def initialize_session(self):
-#         if not self.session:
-#             session = await anext(
-#                 client.aio.live.connect(
-#                     model=MODEL,
-#                     config=CONFIG,
-#                 ).__aiter__()
-#             )
-#             self.session = session
-
-#     async def process_audio(self, audio_data):
-#         print(audio_data)
-#         if not self.session:
-#             await self.initialize_session()
-
-#         await self.session.send({"data": audio_data, "mime_type": "audio/pcm"})
-
-#         async for response in self.session.receive():
-#             if response.server_content:
-#                 model_turn = response.server_content.model_turn
-#                 if model_turn:
-#                     for part in model_turn.parts:
-#                         if part.inline_data:
-#                             return part.inline_data.data
-#         return None
-
-
-# audio_handler = AudioHandler()
-
-
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -78,9 +44,7 @@ def handle_audio_data(data):
     audio_data = base64.b64decode(data.split(",")[1])
 
     def convert_webm_to_pcm(webm_data):
-        # Create input buffer
         input_stream = io.BytesIO(webm_data)
-        output_stream = io.BytesIO()
 
         # Convert webm to PCM using ffmpeg
         stream = ffmpeg.input("pipe:0", format="webm")
@@ -99,7 +63,6 @@ def handle_audio_data(data):
         return stdout
 
     def process_audio_wrapper():
-        # Convert webm to PCM
         pcm_data = convert_webm_to_pcm(audio_data)
 
         # Create event loop for async operation
@@ -112,7 +75,6 @@ def handle_audio_data(data):
 
     async def process_audio(audio_data):
         print("running process_audio")
-        audio_chunks = []
 
         async with client.aio.live.connect(
             model=MODEL,
@@ -127,24 +89,19 @@ def handle_audio_data(data):
                     if model_turn:
                         for part in model_turn.parts:
                             if part.inline_data:
-                                audio_chunks.append(part.inline_data.data)
+                                # Convert single chunk to WAV and send immediately
+                                wav_buffer = io.BytesIO()
+                                with wave.open(wav_buffer, "wb") as wav_file:
+                                    wav_file.setnchannels(1)
+                                    wav_file.setsampwidth(2)
+                                    wav_file.setframerate(24000)
+                                    wav_file.writeframes(part.inline_data.data)
 
-            if audio_chunks:
-                # Combine PCM chunks
-                combined_audio = b"".join(audio_chunks)
-
-                # Convert PCM to WAV
-                wav_buffer = io.BytesIO()
-                with wave.open(wav_buffer, "wb") as wav_file:
-                    wav_file.setnchannels(1)  # Mono
-                    wav_file.setsampwidth(2)  # 16-bit
-                    wav_file.setframerate(24000)  # Sample rate
-                    wav_file.writeframes(combined_audio)
-
-                wav_data = wav_buffer.getvalue()
-                response_b64 = base64.b64encode(wav_data).decode("utf-8")
-                socketio.emit("audio_response", response_b64)
-                print("WAV audio response sent")
+                                wav_data = wav_buffer.getvalue()
+                                response_b64 = base64.b64encode(wav_data).decode(
+                                    "utf-8"
+                                )
+                                socketio.emit("audio_chunk", response_b64)
 
     socketio.start_background_task(process_audio_wrapper)
 

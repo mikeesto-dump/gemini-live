@@ -13,10 +13,18 @@
       const socket = io();
       let mediaRecorder;
       let audioChunks = [];
+      let audioContext;
+      let audioQueue = [];
+      let isPlaying = false;
 
       document
         .getElementById("startRecording")
         .addEventListener("click", async () => {
+          if (!audioContext) {
+            audioContext = new (window.AudioContext ||
+              window.webkitAudioContext)();
+          }
+
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: true,
           });
@@ -43,10 +51,43 @@
         mediaRecorder.stop();
       });
 
-      socket.on("audio_response", (audioData) => {
-        const audio = document.getElementById("audioPlayback");
-        audio.src = `data:audio/wav;base64,${audioData}`;
-        audio.play();
+      async function playNextChunk() {
+        if (audioQueue.length === 0 || !audioContext) {
+          isPlaying = false;
+          return;
+        }
+
+        isPlaying = true;
+        const chunk = audioQueue.shift();
+
+        try {
+          const arrayBuffer = await audioContext.decodeAudioData(chunk.buffer);
+          const source = audioContext.createBufferSource();
+          source.buffer = arrayBuffer;
+          source.connect(audioContext.destination);
+          source.onended = () => {
+            playNextChunk();
+          };
+          source.start();
+        } catch (error) {
+          console.error("Error playing audio chunk:", error);
+          playNextChunk();
+        }
+      }
+
+      socket.on("audio_chunk", (audioData) => {
+        // Convert base64 to ArrayBuffer
+        const binary = atob(audioData);
+        const array = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          array[i] = binary.charCodeAt(i);
+        }
+
+        audioQueue.push(array);
+
+        if (!isPlaying) {
+          playNextChunk();
+        }
       });
     </script>
   </body>
