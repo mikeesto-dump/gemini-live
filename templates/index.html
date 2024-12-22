@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Voice Chat</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+  </head>
+  <body>
+    <button id="startRecording">Start Recording</button>
+    <button id="stopRecording">Stop Recording</button>
+    <audio id="audioPlayback" controls></audio>
+
+    <script>
+      const socket = io();
+      let mediaRecorder;
+      let audioChunks = [];
+
+      document
+        .getElementById("startRecording")
+        .addEventListener("click", async () => {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+          });
+          mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+
+          mediaRecorder.ondataavailable = (event) => {
+            audioChunks.push(event.data);
+          };
+
+          mediaRecorder.onstop = () => {
+            const audioBlob = new Blob(audioChunks);
+            const reader = new FileReader();
+            reader.readAsDataURL(audioBlob);
+            reader.onloadend = () => {
+              socket.emit("audio_data", reader.result);
+              audioChunks = [];
+            };
+          };
+
+          mediaRecorder.start();
+        });
+
+      document.getElementById("stopRecording").addEventListener("click", () => {
+        mediaRecorder.stop();
+      });
+
+      socket.on("audio_response", (audioData) => {
+        const audio = document.getElementById("audioPlayback");
+        audio.src = `data:audio/wav;base64,${audioData}`;
+        audio.play();
+      });
+    </script>
+  </body>
+</html>
